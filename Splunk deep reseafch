@@ -1,0 +1,138 @@
+Splunk Universal Forwarder Installation Failing on WEC Server – Troubleshooting Guide
+
+When a Splunk Universal Forwarder (UF) reinstall on a Windows Event Collector (WEC) server fails after a previous uninstall, it’s usually due to remnants or environmental issues left behind. Below are common causes and detailed troubleshooting steps for each. Always begin by checking Windows Event Viewer (Application/System logs) for installer errors (e.g. MsiInstaller events) and generating an MSI log (with msiexec /L*V) for clues. Then address the following potential issues one by one:
+
+Residual Registry Entries from a Previous Installation
+
+Cause: Uninstalling the forwarder may leave behind registry keys that confuse the new installer. These remnants can make the system think Splunk is still installed or conflict with the creation of new services. In some cases, leftover registry entries have been known to cause installation problems ￼.
+
+How to Troubleshoot and Resolve:
+	1.	Inspect for Splunk Registry Keys: Open Registry Editor (regedit) and search for keys or values containing “Splunk” or “UniversalForwarder.” Focus on locations like:
+	•	HKEY_LOCAL_MACHINE\SOFTWARE\Splunk (and on 64-bit systems, HKLM\SOFTWARE\Wow6432Node\Splunk).
+	•	HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall – look for any subkey referencing Splunk or the Universal Forwarder (if found, it means the system still has an uninstall entry).
+	•	HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\ – check for a SplunkForwarder service key.
+	2.	Backup and Delete Splunk Keys: If you find remnants, export those keys for backup, then delete them. For example, delete the SplunkForwarder service key and any Splunk keys under SOFTWARE. This ensures no old configuration is detected by the installer.
+	3.	Search User-Specific Keys: Optionally, search HKEY_USERS and HKEY_CURRENT_USER for “Splunk” in case any per-user settings were left (there usually shouldn’t be many, but worth checking).
+	4.	Reboot and Retry: After cleaning the registry, reboot the server (to unload any handles) and try running the UF installer again. With conflicting registry entries removed, the installation should proceed if this was the root cause.
+
+Incomplete Removal of Old Files or Running Services
+
+Cause: The previous uninstall might not have removed all files, or the Splunk service was not fully stopped. A lingering SplunkUniversalForwarder folder, running process, or Windows service can prevent new installation (for example, the new MSI might fail to overwrite existing files or to create a service that already exists).
+
+How to Troubleshoot and Resolve:
+	1.	Check for Running Services: Open Services.msc and look for “SplunkForwarder” (or similar Splunk service name). If the Splunk Forwarder service still exists from the old install, right-click and Stop it. Then either delete it via command line (sc delete SplunkForwarder) or mark it for deletion.
+	2.	Kill Running Processes: Open Task Manager and see if any Splunk processes are running (e.g. splunkd.exe, splunk-winserv.exe). If so, end those processes. A stuck Splunk process could lock files and block the installer.
+	3.	Remove Leftover Files: Using File Explorer, navigate to the old installation directory (by default, C:\Program Files\SplunkUniversalForwarder\). If that folder (or files within it) still exists, it means the uninstall did not fully clean it. Manually delete the SplunkUniversalForwarder folder. If Windows complains about locked files, double-check that no process is using them, or rename the folder and reboot to release locks.
+	4.	Remove Old User Accounts: If the forwarder was configured to run under a specific user account (either a local Splunk service account or a domain account), ensure that account was removed or is not causing conflicts. For example, if a local user splunkforwarder still exists (introduced in newer versions), you might remove or rename it to allow the installer to recreate it if needed.
+	5.	Clean Temporary Files: Sometimes Windows Installer may have cached files. Clear out temporary directories (like C:\Windows\Temp or your user’s Temp) of any Splunk installer temp files, which could interfere with a fresh install.
+	6.	Retry Installation: After ensuring no services are running and no old files persist, run the installer again. A clean system should allow the new UF to install successfully.
+
+Windows Group Policy or Software Restriction Blocking Installation
+
+Cause: In domain environments or on hardened servers, Group Policy settings can prevent software installation. Software Restriction Policies (SRP) or AppLocker might be blocking the Splunk MSI, or Windows Installer might be disabled for certain users. This often manifests as an error like “The system administrator has set policies to prevent this installation,” causing the setup to end prematurely.
+
+How to Troubleshoot and Resolve:
+	1.	Check Event Logs for Policy Blocks: Open Event Viewer and look under System and Application logs around the time of the failed install. If a Software Restriction Policy blocked the MSI, you might see an event indicating so (Source might be MsiInstaller or SoftwareRestrictionPolicy). Specifically look for messages about installation being disallowed by policy ￼.
+	2.	Identify the Policy: If such events are present, identify whether it’s AppLocker or SRP. For SRP, the event will typically mention “.msi is not permitted” or an SRP rule. For AppLocker, look in Event Viewer → Application and Services Logs → Microsoft → Windows → AppLocker for any blocked EXE/MSI event.
+	3.	Run as Administrator: A quick workaround is to install from an elevated command prompt. Right-click Command Prompt -> Run as Administrator, then run msiexec /i splunkforwarder.msi. In some cases, SRP is configured to allow installations only with full admin rights, and running it this way can succeed (as seen in one case where launching MSI from admin CMD bypassed the policy ￼ ￼).
+	4.	Adjust or Temporarily Disable Policy: If the policy is still blocking:
+	•	For SRP: You may need to change the “DisableMSI” policy. Using gpedit.msc (if local policy) or your domain GPO editor, navigate to Computer Configuration → Administrative Templates → Windows Components → Windows Installer and ensure “Disable Windows Installer” is not enabled (or at least not set to always disable). The registry equivalent is setting HKLM\SOFTWARE\Policies\Microsoft\Windows\Installer\DisableMSI to 0 (allow all MSI installs) ￼.
+	•	For AppLocker: Temporarily set the AppLocker execution policy to “Audit only” or create an exception for the Splunk installer. (This requires Group Policy changes on the domain or local security policy changes.)
+	•	For other GPO restrictions: Check if there’s a policy blocking MSI with certain publisher or requiring a certain privilege. Often, the simplest route is to coordinate with your domain admins to whitelist the Splunk installer or disable the restriction for this machine during installation.
+	5.	Retry Installation: After policy adjustments, run gpupdate /force to refresh policies. Then try installing the forwarder again. If policy was the issue, the installer should now run. Remember to re-enable any policies (if you temporarily disabled them) after a successful install for security compliance.
+
+System Environment Variables Not Reset
+
+Cause: Splunk’s installer or runtime may use environment variables (like SPLUNK_HOME) if they are present. If the previous installation left behind such variables or PATH entries, they could point to non-existent directories or cause conflicts. This is less common, but a stray environment variable could confuse scripts or the service startup.
+
+How to Troubleshoot and Resolve:
+	1.	Check Environment Variables: Open System Properties -> Advanced -> Environment Variables. Look in both User and System sections for any variables related to Splunk:
+	•	SPLUNK_HOME, SPLUNK_ETC, SPLUNK_BIN etc., or any mention of Splunk paths in the PATH variable.
+	2.	Remove or Update Splunk Variables: If you find any such variables pointing to the old installation path, remove them or correct them. For example, if SPLUNK_HOME is set to C:\Program Files\SplunkUniversalForwarder (old path) and you plan to reinstall to the same location, you might remove the variable entirely (the installer will operate with its default paths).
+	3.	Apply Changes: Close and reopen any command prompts or applications to ensure they don’t have the old environment loaded. It might be wise to reboot after removing environment variables to be certain the system and service control manager aren’t seeing stale values.
+	4.	Retry Installation: Run the Splunk UF installer again after the cleanup. With no conflicting environment variables, it should proceed normally. After installation, you can verify if the installer set any new environment variables (Splunk typically does not set a persistent SPLUNK_HOME by default – it’s usually optional for user convenience ￼).
+
+Windows Installer (MSI) Issues (Corruption or Permissions)
+
+Cause: A generic “installation ended prematurely” or error code 1603 can indicate Windows Installer problems. This could be due to a corrupted MSI, an incomplete prior install leaving Windows Installer in a bad state, or insufficient rights to perform an installation. Essentially, the MSI engine is failing to execute the installation to completion.
+
+How to Troubleshoot and Resolve:
+	1.	Re-download the Installer: First, rule out a bad installer package. Download a fresh copy of the Splunk Universal Forwarder MSI from Splunk’s official site. Ensure you have the correct architecture (32-bit vs 64-bit) for your system.
+	2.	Run as Administrator: Always run the MSI with administrative privileges (right-click -> Run as administrator). Even if you are logged in as an admin, Windows UAC can block certain actions if not elevated. This ensures the installer can write to protected areas like Program Files and the registry.
+	3.	Enable Installer Logging: Open an elevated command prompt and run the installer with logging, for example:
+
+msiexec /i splunkforwarder.msi /L*V "C:\splunkUF_install.log"  
+
+After it fails, open the generated splunkUF_install.log and search for “Return value 3” or “Error”. The lines around those keywords often reveal the failing action or permission issue. For instance, if the log shows “CustomAction … returned actual error code 1603”, or mentions a specific file or registry key, you can pinpoint what step failed.
+
+	4.	Re-register Windows Installer: Sometimes the Windows Installer service itself is glitchy. You can reset it by running two commands in an admin console:
+
+msiexec /unregister  
+msiexec /regserver  
+
+Then try the installation again. Re-registering Windows Installer can fix mysterious “ended prematurely” errors by repairing installer registration.
+
+	5.	Check for Existing Install Records: Even if you removed registry keys manually, also check Programs and Features (Add/Remove Programs). If “Splunk Forwarder” or similar still appears, attempt to uninstall it from there. If it’s stuck, use Microsoft’s Program Install and Uninstall Troubleshooter (a tool to fix corrupt installer entries) to forcibly remove the old Splunk Forwarder entry. This cleans Windows Installer’s internal records.
+	6.	Verify Permissions: Ensure the account performing the install has full admin rights. If you are using a service account or installing via a software deployment tool, make sure it uses Local System or an admin account context. Also verify that C:\Program Files (or your chosen install path) and the registry are not locked down by ACLs – on some servers, administrators might not have default ownership of certain folders. Take ownership of the old Splunk directory if needed before deletion or installation.
+	7.	Consider Windows Updates: Make sure Windows is up to date. There have been cases where an outdated Windows Installer (msiexec) or missing OS patches cause MSI installations to fail. Installing the latest Windows Installer version (or OS updates that update it) and rebooting could help.
+	8.	Review Event Viewer: In the Application log, look for MsiInstaller events. For an MSI failure, Event Viewer might log an Event ID 11708 or 1603 with a description of the failure. This can sometimes indicate which component failed. For example, an event might say a service failed to start, or “installation operation failed” with a certain account or path mentioned.
+	9.	Retry Installation (Post-Fix): After applying the above fixes, try installing again. If it still “rolls back” with no clear message, double-check the installer log for any hint of which custom action or file caused the rollback. You may need to address that specific item (for instance, if it fails to add a firewall rule, try manually adding an exception or turn off the firewall during install, etc.). Once the Windows Installer issues are resolved, the UF installation should succeed without prematurely ending.
+
+Conflicts with Other Applications or Security Software
+
+Cause: Another application on the WEC server might be interfering with Splunk UF’s installation or startup. Common examples include port conflicts (Splunk’s default management port 8089 being in use), or security software (anti-virus, endpoint protection) blocking installation actions or Splunk processes. Such conflicts can cause the installer to error out or the Splunk service to fail to start (triggering a rollback).
+
+How to Troubleshoot and Resolve:
+	1.	Check for Port Conflicts: Splunk Universal Forwarder’s management service listens on TCP 8089 by default. If another process is already using this port, the forwarder will fail to start and installation may roll back with an error. Use netstat -ano or PowerShell (Get-NetTCPConnection) to see if port 8089 is in use. If you find a process (e.g., w3wp.exe (IIS) or any other) using 8089, that’s a conflict ￼. You have a few options to resolve:
+	•	Stop or reconfigure the other service using that port (if feasible).
+	•	Install the UF without auto-starting (use the installer option LAUNCHSPLUNK=0), then edit Splunk’s web.conf or server.conf to change the management port to an open port, and start the service manually.
+	•	Or plan to run Splunk on a different port after install (though the installer itself will attempt 8089 on first start). For example, if WEC (or another agent) absolutely requires 8089, configure Splunk to use 8088 or 8090 post-installation.
+	2.	Temporarily Disable Anti-virus: Security software may block the creation of new services, execution of installer scripts, or the launching of Splunk’s binaries (which might be falsely flagged). As a test, disable any antivirus or endpoint protection during the installation. If the install succeeds with AV off, configure appropriate exclusions for Splunk files and directories, then re-enable your security software. Check the AV logs/quarantine to see if it blocked or sandboxed any Splunk components.
+	3.	Check for Other Splunk Instances: Ensure you are not accidentally competing with an existing Splunk installation:
+	•	If Splunk Enterprise (full instance) is on this server (not typical for a WEC, but possible), note that it also uses port 8089 and a splunkd service. You generally don’t install UF alongside Splunk Enterprise on the same machine ￼. In such a case, use Splunk Enterprise’s forwarder capabilities or choose either the full instance or UF, but not both.
+	•	If an older UF was somehow still partially installed (e.g., an older version’s service not removed), that overlaps with the “incomplete removal” section above – make sure it’s fully gone.
+	4.	Examine Host Intrusion Prevention: Some systems have HIPS or application control (like Carbon Black, McAfee Application Control) that prevent new services or certain file modifications. These might not show a standard error but silently block actions. If such tools are present, put the system in maintenance mode or whitelist the Splunk installer and service executables (splunkd.exe, splunk-winserv.exe, etc.) before installing.
+	5.	Review Logs for Clues: If the installer log or Event Viewer shows errors like “Could not bind to port 8089” ￼ or “The specified account already exists” (which could hint at a conflict in user accounts as well), address those specific conflicts:
+	•	The port bind error confirms another app using the port (as above).
+	•	An “account already exists” error suggests the Splunk service user account creation is conflicting (see the Active Directory section below for handling service account issues) ￼.
+	6.	Post-Install Adjustments: Once you get the forwarder installed, configure any conflicting settings. For instance, if you disabled antivirus, turn it back on and ensure Splunk’s program files are excluded from real-time scanning (to avoid performance issues or future blocks). If you changed the management port, document this change for your deployment (so your deployment server or admin knows the forwarder is on a non-standard port).
+
+Addressing these application and security conflicts prior to installation will help ensure the Splunk UF installs and starts smoothly.
+
+Missing Dependencies (Visual C++ Redistributables or .NET Framework)
+
+Cause: The Splunk UF installer or binary may rely on certain Microsoft runtime libraries. Missing dependencies (like a required Visual C++ Redistributable version or .NET framework components) can cause the installation to fail or the program to not start. For example, if a required DLL from the Visual C++ runtime is absent, the service might error out upon launch. While Splunk forwarders are mostly self-contained, they do use Microsoft C/C++ runtime libraries ￼. (.NET is generally not a direct requirement for the UF core functionality, but the installer might need it for certain optional features or if using PowerShell scripts for inputs.)
+
+How to Troubleshoot and Resolve:
+	1.	Install Visual C++ Redistributables: Ensure that common Visual C++ runtime libraries are present on the system. Splunk UF (and Enterprise) have been known to use the Visual C++ libraries (for example, older versions used the 2010 runtime) ￼. It’s good practice to install the Visual C++ 2010, 2013, and 2015-2019 Redistributables (both x86 and x64, since some Splunk components might be 32-bit). You can download these from Microsoft’s website. After installing the redistributables, reboot the server and try the Splunk UF installer again.
+	2.	Verify .NET Framework: Check if the server has .NET Framework 4.x installed (most modern Windows versions do by default) and if any older .NET (like 3.5) is required for your environment. The Splunk forwarder itself does not require .NET to run its core services ￼, but if you plan to use Windows Performance Counters or WMI log collection via scripts, .NET might be indirectly used. Enable the .NET 3.5 feature on Windows (via Server Manager or Install-WindowsFeature Net-Framework-Core) if your environment or GPO has it turned off and you suspect the installer is calling a .NET-based component.
+	3.	Look for Error Indicators: If the installation fails with a specific DLL error (e.g., “MSVCR100.dll is missing” or similar), that points to a missing Visual C++ 2010 runtime. If you see “unable to initialize Python DLL” in Splunk logs, that could indicate missing Visual C++ 2017/2019 runtime (since Splunk’s Python 3 may depend on it). Install the appropriate packages and then retry.
+	4.	Verify PowerShell Availability: Splunk sometimes invokes PowerShell during certain app or add-on setups (not typically during base UF install, but if you’re also deploying the Windows TA). Ensure Windows PowerShell is installed and not restricted by policy (execution policy shouldn’t block all scripts) – lack of PowerShell isn’t usually a hard stop for installing the UF, but it’s good to have a functioning PowerShell for later configuration.
+	5.	Retry After Installing Dependencies: Once you’ve installed the necessary runtimes/frameworks, run the UF installer again. If dependency was the issue, the installation should succeed and the forwarder should start without issue. Going forward, keep those runtimes up to date (Windows Update will often patch Visual C++ redistributables if needed). It’s also a good idea to document which extra packages you added to support Splunk UF on that server for future reference.
+
+Active Directory and Domain Policy Considerations
+
+Cause: In a domain environment (especially on a domain controller), certain AD-related factors can interfere with the installation. Splunk’s newer forwarders (9.1+) create a “splunkforwarder” virtual service account by default for least privilege operation ￼. On a domain controller, creating this account or required groups may fail due to the absence of local user groups ￼. Additionally, domain Group Policies might restrict creating new local users or require special privileges for services. If the previous forwarder was running as a domain account, there could be permission or existence issues during reinstall. All these AD/domain factors can cause the installer to error out (for example, failing at the service creation step or reporting that an account already exists).
+
+How to Troubleshoot and Resolve:
+	1.	Installing on a Domain Controller: If your WEC server is also a Domain Controller, be aware that the UF installer’s default behavior (creating a “splunkforwarder” local user) won’t work properly. Splunk documentation recommends using the Local System account on domain controllers ￼. During installation, choose the option to run the service as Local System (or use the MSI property AGREETOLICENSE=Yes SERVICESTARTTYPE=auto LAUNCHSPLUNK=1 SPLUNKUSERNAME=.\LocalSystem if doing a silent install) to avoid creating a new account. This bypasses the need for local user creation on the DC.
+	2.	Domain User for Service: If you prefer the Splunk service run as a domain user (for reading network resources), you must pre-create a domain account with the necessary rights (“Log on as a service” right, and ideally a member of local Administrators or at least with read access to desired logs). Supply those credentials during the install. If an account with the same name was used in the previous install, ensure that account is still present and its password is known, or use a new account. An installer failure with “The specified account already exists” means you should either choose a different account name or remove the existing account beforehand ￼.
+	3.	Clean Up Previous Service Accounts: If the earlier installation created a user (like .\splunkforwarder or a domain user) and that user still exists, the new installer might conflict if you attempt to create the same user again. Consider deleting the leftover splunkforwarder local user (use Computer Management -> Users on non-DC servers) before reinstalling, so the installer can recreate it fresh. If it’s a domain account you reused, you don’t need to delete it, but ensure the installer is aware (by providing credentials).
+	4.	Group Policy on Accounts: Some domain policies restrict local account creation or have Privileged Access Management rules. If a GPO disallows creating local users or restricts the rights of service accounts, coordinate with your AD team to allow the Splunk installer’s actions. For instance, a policy might remove “Users” from local Administrators group periodically, or might enforce that services run as gMSA (Group Managed Service Accounts) only. In such cases, you can manually create a gMSA for Splunk and use it for the service (Splunk supports running as a domain account, which could be a gMSA via command-line install with SPLUNKUSERNAME="Domain\\Account$" format for gMSA).
+	5.	Permissions to Install on Domain: Ensure the account you’re using to install has sufficient domain privileges if needed. For a member server, local admin rights are usually enough. But if a GPO requires certain signing or certain elevation, make sure to meet those requirements (e.g., some environments require using a domain admin to install services on servers).
+	6.	Examine AD Logs: If the installation fails at the user/account creation step, check the Security log in Event Viewer for any failures (like Audit Failures for account creation or privilege assignments). This might show if something in AD/GPO blocked the action.
+	7.	Install with Alternative Method if Needed: If policies are very strict, you can install the UF software files manually and configure the service yourself:
+	•	Run the MSI on a test box to extract the files, or use MSI admin install (msiexec /a) to unpack the files without fully installing.
+	•	Then copy the SplunkUniversalForwarder folder to the WEC server and use the command line splunk.exe install forwarder -user <user> -password <pass> to create the service under a specified account. This method might bypass some installer policy restrictions since it uses Splunk’s binary to register the service.
+	•	Note: Only do this if you’re comfortable and when official installer can’t be used due to policy, as it’s a more manual process.
+	8.	Verify Post-Install Configuration: After a successful install on a domain, test that the Splunk forwarder is running and collecting event logs as expected. If running under a least-privileged user, ensure that user has access to the Event Logs (add it to the Event Log Readers group as needed, especially for Security log access) ￼. If running under Local System on a DC, it should have access by default. The key is to balance security with functionality in accordance with your domain’s policies.
+
+By systematically addressing each of the areas above – from leftover registry/service artifacts to policy and dependency issues – you can identify why the Splunk Universal Forwarder installation was failing on the WEC server and implement the appropriate fix. Always make one change at a time and re-attempt the installation, to narrow down which factor was responsible. Once installed, document any special configurations (service account used, custom ports, etc.) for future maintenance. With the forwarder running, it should begin sending WEC-collected events to Splunk as intended. Good luck, and happy troubleshooting!
+
+Sources:
+	•	Splunk Community discussion on registry remnants causing reinstall issues ￼
+	•	Windows Installer error for blocked installations due to policy ￼
+	•	Splunk documentation on forwarder service account on domain controllers ￼ ￼
+	•	Splunk Answers post indicating port 8089 conflict causing install failure ￼
+	•	Installer error indicating existing account conflict ￼
+	•	Confirmation that Splunk uses Visual C++ runtime libraries ￼ (implying need for those redistributables)
