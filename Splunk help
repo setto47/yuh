@@ -1,0 +1,53 @@
+	1.	Check Installation Logs:
+	•	Location: C:\Windows\Temp\splunk-<timestamp>.log or C:\Program Files\SplunkUniversalForwarder\var\log\splunk\.
+	•	Look for any ERROR or FATAL messages.
+	2.	Run as Administrator:
+	•	Make sure to right-click the installer and select Run as administrator.
+	3.	Disk Space and Permissions:
+	•	Verify there is enough disk space.
+	•	Ensure the SYSTEM and Administrator accounts have full control over the installation directory.
+	4.	Antivirus Interference:
+	•	Temporarily disable Windows Defender or any third-party antivirus.
+	5.	PowerShell Execution Policy:
+	•	Run PowerShell as admin and check:
+Get-ExecutionPolicy
+
+	•	If it returns Restricted, change it temporarily:
+Set-ExecutionPolicy RemoteSigned
+
+
+	6.	.NET Framework Requirements:
+	•	Ensure the required .NET Framework version is installed.
+	7.	Previous Installation Residue:
+	•	Check for any existing Splunk Universal Forwarder directories at:
+C:\Program Files\SplunkUniversalForwarder\
+
+	•	If present, delete the folder after stopping any related services:
+sc stop SplunkForwarder
+
+
+	8.	UAC (User Account Control) Interference:
+	•	Temporarily disable UAC:
+	•	Control Panel > User Accounts > Change User Account Control settings > Never Notify
+	9.	Install Using Command Line for Verbose Logging:
+	•	Run the installer with verbose logging:
+msiexec /i splunkforwarder-<version>-x64-release.msi /L*v install.log
+
+
+	•	Check install.log for detailed error messages.
+
+	10.	Windows Event Log Errors:
+	•	Check Windows Event Viewer for application errors:
+	•	Windows Logs > Application > Look for Splunk or MSI errors
+	11.	Dependency Services Check:
+	•	Ensure the following services are running:
+	•	Windows Event Log
+	•	Remote Procedure Call (RPC)
+	12.	Corrupted Installer:
+	•	Re-download the Splunk Universal Forwarder MSI to ensure it’s not corrupted.
+
+If you need help analyzing logs, please share the contents of the installation log.
+
+
+
+
