@@ -1,0 +1,47 @@
+Troubleshooting WDS Boot Image Not Retaining Modifications
+If the RemoteInstall directory contains all the correct files, but modifications disappear during PXE boot, WDS is likely modifying or resetting the boot image when it is sent to the PXE client.
+Possible Causes
+1. WDS is processing the image during PXE boot and stripping your modifications.
+2. WinPE is running in a non-persistent mode, reverting to a clean state.
+3. A secondary boot image (or cached PXE image) is being used instead of the modified one.
+Fixing the Issue
+Step 1: Disable WDS from Modifying the Boot Image
+By default, WDS processes boot images before sending them over PXE. Disable this to prevent modifications.
+Run this command on your WDS server:
+wdsutil /set-server /BootImageOptimization:No
+Restart WDS:
+net stop wdsserver
+net start wdsserver
+Then, delete and re-import boot.wim in WDS Manager.
+Step 2: Ensure PXE Clients Are Pulling the Correct Boot Image
+1. Delete the existing Boot Image in WDS.
+2. Manually copy your modified boot.wim into the correct directory:
+copy "C:\winpe\boot.wim" "C:\RemoteInstall\Boot\x64\Images\boot.wim"
+3. Re-add the Boot Image in WDS Manager.
+4. Restart the PXE Client Completely:
+- Power off the PXE client.
+- Unplug it for 30 seconds.
+- Try PXE booting again.
+Step 3: Check If WinPE is Reverting to a Clean State
+Once you PXE boot, press Shift + F10 to open Command Prompt and check if your test file still exists:
+dir C:\Windows\System32\
+If it’s missing, WinPE is wiping changes at boot.
+Fix: Use a Custom Scratch Space:
+dism /image:"C:\mount" /set-scratchspace:128
+Commit the Changes and Unmount:
+dism /unmount-wim /mountdir:"C:\mount" /commit
+Step 4: Verify the Image WDS is Sending
+Capture the image name WDS is sending by running this on the PXE client:
+wpeutil UpdateBootInfo
+If the image name doesn’t match your modified boot.wim, check the WDS log:
+Get-Content "C:\Windows\Temp\wdssetup.log" -Tail 50
+Final Summary
+✔ WDS might be modifying the boot image before sending it.
+✔ WinPE might be resetting itself at boot.
+✔ The PXE client might be pulling a different image than expected.
+
+Try disabling Boot Image Optimization and increasing scratch space first. If the issue persists, force PXE clients to download the exact file.
+
+
+wpeutil UpdateBootInfo
+Get-Content "C:\Windows\Temp\wdssetup.log" -Tail 50
